@@ -1,38 +1,86 @@
-var createError = require('http-errors');
-var express = require('express');
-var path = require('path');
-var logger = require('morgan');
+require('dotenv').config();
+const express = require('express');
+const { Telegraf } = require('telegraf');
+const axios = require('axios');
+const path = require('path');
+const fs = require('fs');
+const FormData = require('form-data');
 
-var indexRouter = require('./routes/index');
-var usersRouter = require('./routes/users');
+const app = express();
+const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
-var app = express();
-
-// view engine setup
-app.set('views', path.join(__dirname, 'views'));
-app.set('view engine', 'jade');
-
-app.use(logger('dev'));
+// Middleware для обработки multipart/form-data
 app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: true }));
 
-app.use('/', indexRouter);
-app.use('/users', usersRouter);
-
-// catch 404 and forward to error handler
-app.use(function(req, res, next) {
-  next(createError(404));
+// Обработчик команды /start
+bot.start((ctx) => {
+  ctx.reply(
+    'Привет! Отправь мне фотографию мусора, и я определю его тип. ' +
+    'Можно отправить несколько фотографий сразу.'
+  );
 });
 
-// error handler
-app.use(function(err, req, res, next) {
-  // set locals, only providing error in development
-  res.locals.message = err.message;
-  res.locals.error = req.app.get('env') === 'development' ? err : {};
+const classes = {
+  'PAPER': 'бумага',
+  'GLASS': 'стекло',
+  'PLASTIC': 'пластик',
+  'BIODEGRADABLE': 'органические отходы',
+  'CARDBOARD': 'картон',
+  'METAL': 'металл',
+  'TRASH': 'другое',
+}
 
-  // render the error page
-  res.status(err.status || 500);
-  res.render('error');
+// Обработчик для фотографий
+bot.on('photo', async (ctx) => {
+  try {
+    // Получаем фото с самым высоким разрешением
+    const photo = ctx.message.photo.pop();
+    const fileLink = await ctx.telegram.getFileLink(photo.file_id);
+
+    // Скачиваем фото
+    const response = await axios.get(fileLink, { responseType: 'arraybuffer' });
+    const buffer = Buffer.from(response.data, 'binary');
+    const filename = path.join('uploads', `${Date.now()}.jpg`);
+
+    fs.writeFileSync(filename, buffer);
+
+    // Отправляем фото в API для классификации
+    const formData = new FormData();
+    formData.append('file', fs.createReadStream(filename));
+
+    const apiResponse = await axios.post(process.env.API_ENDPOINT + '/wastes/classify/', formData, {
+      headers: {
+        ...formData.getHeaders(),
+      }
+    });
+
+    // Удаляем временный файл
+    fs.unlinkSync(filename);
+
+    // Отправляем результат пользователю
+    const wasteType = classes[apiResponse.data.class] || 'Не удалось определить';
+    const confidence = apiResponse.data.confidence ? Math.round(apiResponse.data.confidence * 100) : 0;
+
+    ctx.replyWithMarkdown(
+      `*Тип мусора:* ${wasteType}\n` +
+      `*Точность:* ${confidence}%`
+    );
+
+  } catch (error) {
+    console.error('Error processing photo:', error);
+    ctx.reply('Произошла ошибка при обработке изображения. Пожалуйста, попробуйте еще раз.');
+  }
 });
 
-module.exports = app;
+// Вебхук для Telegram бота
+// app.use(bot.webhookCallback('/telegram-webhook'));
+// bot.telegram.setWebhook(`${process.env.BASE_URL}/telegram-webhook`);
+
+bot.launch();
+
+// Запуск сервера
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
