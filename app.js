@@ -118,7 +118,8 @@ bot.on('photo', async (ctx) => {
       predictedClass: apiResponse.data.class,
       confidence: confidence,
       messageId: message.message_id,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      userFeedback: null // Добавляем поле для хранения отзыва пользователя
     });
     fs.writeFileSync(ANSWERS_FILE, JSON.stringify(answers, null, 2));
 
@@ -128,16 +129,14 @@ bot.on('photo', async (ctx) => {
   }
 });
 
-// Обработчик инлайн-кнопок
+// Модифицируем обработчики кнопок:
 bot.action('correct', async (ctx) => {
   try {
-    // Получаем оригинальное сообщение
+    const messageId = ctx.update.callback_query.message.message_id;
     const messageText = ctx.update.callback_query.message.text.split('\n\n')[0];
 
-    // Редактируем сообщение, удаляя кнопки
     await ctx.editMessageText(messageText, { parse_mode: 'Markdown' });
-
-    await updateStats(true);
+    await updateStats(true, messageId);
     await ctx.answerCbQuery('Спасибо за обратную связь!');
   } catch (error) {
     console.error('Error processing correct action:', error);
@@ -147,30 +146,36 @@ bot.action('correct', async (ctx) => {
 
 bot.action('incorrect', async (ctx) => {
   try {
-    // Получаем оригинальное сообщение
+    const messageId = ctx.update.callback_query.message.message_id;
     const messageText = ctx.update.callback_query.message.text.split('\n\n')[0];
 
-    // Редактируем сообщение, удаляя кнопки
     await ctx.editMessageText(messageText, { parse_mode: 'Markdown' });
-
-    await updateStats(false);
+    await updateStats(false, messageId);
     await ctx.answerCbQuery('Спасибо за обратную связь! Мы учтём это для улучшения бота.');
   } catch (error) {
     console.error('Error processing incorrect action:', error);
     await ctx.answerCbQuery('Произошла ошибка, попробуйте позже');
   }
 });
-// Функция обновления статистики
-async function updateStats(isCorrect) {
-  const stats = JSON.parse(fs.readFileSync(STATS_FILE));
 
+// Функция обновления статистики
+async function updateStats(isCorrect, messageId) {
+  // Обновляем общую статистику
+  const stats = JSON.parse(fs.readFileSync(STATS_FILE));
   if (isCorrect) {
     stats.correct += 1;
   } else {
     stats.incorrect += 1;
   }
-
   fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
+
+  // Обновляем конкретный ответ в ANSWERS_FILE
+  const answers = JSON.parse(fs.readFileSync(ANSWERS_FILE));
+  const answerIndex = answers.findIndex(a => a.messageId === messageId);
+  if (answerIndex !== -1) {
+    answers[answerIndex].userFeedback = isCorrect ? 'correct' : 'incorrect';
+    fs.writeFileSync(ANSWERS_FILE, JSON.stringify(answers, null, 2));
+  }
 }
 
 // Команда для получения статистики

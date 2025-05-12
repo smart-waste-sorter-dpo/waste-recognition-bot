@@ -15,6 +15,7 @@ async function createExcelReport() {
     { header: 'Фото', key: 'photo', width: 30 },
     { header: 'Тип мусора', key: 'wasteType', width: 20 },
     { header: 'Точность (%)', key: 'confidence', width: 15 },
+    { header: 'Ответ', key: 'userFeedback', width: 15 }
   ];
 
   // Читаем данные из JSON
@@ -27,6 +28,11 @@ async function createExcelReport() {
     'CARDBOARD': 'картон',
     'METAL': 'металл',
     'TRASH': 'другое'
+  };
+
+  const userFeedback = {
+    'correct': 'Верно',
+    'incorrect': 'Не верно',
   };
 
   // Добавляем данные в таблицу
@@ -51,7 +57,7 @@ async function createExcelReport() {
     worksheet.addRow({
       wasteType: classes[answer.predictedClass] || answer.predictedClass,
       confidence: answer.confidence,
-
+      userFeedback: answer.userFeedback ? userFeedback[answer.userFeedback] : 'Нет ответа' ,
     });
 
     // Устанавливаем высоту строки для изображения
